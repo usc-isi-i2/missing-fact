@@ -13,11 +13,13 @@ from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.tokenizers import Tokenizer, WordTokenizer
 from overrides import overrides
 
-from missingfact.data.tools.conceptnet_utils import convert_entity_to_string
-from missingfact.data.tools.conceptnet_utils import retrieve_scored_tuples, \
+from missingfact.data.tools.cskg_utils import convert_entity_to_string
+from missingfact.data.tools.cskg_utils import retrieve_scored_tuples, \
     convert_relation_to_string, \
-    load_kbtuples_map
-from missingfact.data.tools.conceptnet_utils import tokenize_and_stem_str
+    load_kbtuples_map, \
+	load_node_labels
+from missingfact.data.tools.cskg_utils import tokenize_and_stem_str
+
 from missingfact.data.tools.es_search import EsSearch
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -47,14 +49,14 @@ class ArcKnowledgeSentencesJsonReader(DatasetReader):
 
     def __init__(self,
                  use_elastic_search: bool,
-                 use_conceptnet: bool,
+                 use_cskg: bool,
                  es_client: str = "localhost",
                  indices: str = "arc_corpus",
                  max_question_length: int = 1000,
                  max_hits_retrieved: int = 500,
                  max_hit_length: int = 300,
                  max_hits_per_choice: int = 100,
-                 conceptnet_kb_path: str = "cached_conceptnet.tsv",
+                 kg_path: str = "cskg/edges_v004.csv", 
                  ignore_related: bool = False,
                  add_relation_labels: bool = True,
                  tokenizer: Tokenizer = None,
@@ -68,15 +70,14 @@ class ArcKnowledgeSentencesJsonReader(DatasetReader):
 
         :param use_elastic_search: Set to true, if elasticsearch should be used to retrieve relevant
         sentences
-        :param use_conceptnet: Set to true, if conceptnet tuples should be used
+        :param use_cskg: Set to true, if cskg tuples should be used
         :param es_client: ElasticSearch host
         :param indices: ElasticSearch indices (comma-separated)
         :param max_question_length: Question trimmed to these many characters in the ES query
         :param max_hits_retrieved: Maximum number of hits requested per query
         :param max_hit_length: Maximum length of sentence retrieved using ES
         :param max_hits_per_choice: Maximum number of sentences retrieved per choice
-        :param conceptnet_kb_path: Location of the ConceptNet tuple TSV
-        Format: /r/ConceptNetRel    /c/en/Subject   /c/en/Object
+        :param kg_path: Location of the edges tuple TSV
         :param ignore_related: Ignore /r/RelatedTo relations from ConceptNet
         :param add_relation_labels: If set to False, ignore the missing-fact relations (provided
         using the "relations" key)
@@ -87,19 +88,21 @@ class ArcKnowledgeSentencesJsonReader(DatasetReader):
         retrieval step. Note the spans can still be used in the model
         :param aggressive_filtering: If set to true, filter near-duplicate sentences too (as
         specified in filter_near_duplicates()
-        :param max_tuples: Maximum number of conceptnet tuples
+        :param max_tuples: Maximum number of cskg tuples
         :param use_top_relation: If set to True, only use the most common relations in the
         annotation as relation labels. If set to false, all of the relations are used as labels.
         """
         super().__init__()
         self._use_elastic_search = use_elastic_search
-        self._use_conceptnet = use_conceptnet
+        self._use_cskg = use_cskg
         if self._use_elastic_search:
             self._es_search = EsSearch(es_client, indices, max_question_length, max_hits_retrieved,
                                        max_hit_length, max_hits_per_choice)
             self._indices = indices
-        if self._use_conceptnet:
-            self._kb_tuples, self._tok_idx_map = load_kbtuples_map(conceptnet_kb_path,
+        if self._use_cskg:
+			nodes_path=kg_path.replace('edges', 'nodes')
+			self._node2label=load_node_labels(nodes_path)
+            self._kb_tuples, self._tok_idx_map = load_kbtuples_map(kg_path, self._node2label,
                                                                    ignore_related)
         self._max_hit_length = max_hit_length
         self._tokenizer = tokenizer or WordTokenizer()
@@ -235,7 +238,7 @@ class ArcKnowledgeSentencesJsonReader(DatasetReader):
                 trigram_to_sentence_indices[trigram_key].append(sentence_index)
         return result
 
-    def get_conceptnet_sentences(self, fact: str, answer_span: List[str],
+    def get_cskg_sentences(self, fact: str, answer_span: List[str],
                                  choice: str, max_tuples: int):
         choice_tuples = []
         if self._ignore_spans:
@@ -256,9 +259,9 @@ class ArcKnowledgeSentencesJsonReader(DatasetReader):
                 break
         topk_tuple_sentences = []
         for tuple in topk_unique_tuples:
-            updated_relation = convert_relation_to_string(tuple[1])
-            tuple_as_sentence = convert_entity_to_string(tuple[0]) + " is " + updated_relation + \
-                                " " + convert_entity_to_string(tuple[2])
+            updated_relation = convert_relation_to_string(tuple[1]) #, self._node2label)
+            tuple_as_sentence = convert_entity_to_string(tuple[0], self._node2label) + " is " + updated_relation + \
+                                " " + convert_entity_to_string(tuple[2], self._node2label)
             topk_tuple_sentences.append(tuple_as_sentence)
         return topk_tuple_sentences
 
@@ -283,7 +286,7 @@ class ArcKnowledgeSentencesJsonReader(DatasetReader):
         for choice in choice_text_list:
             kb_fields = []
 
-            if self._use_conceptnet and self._use_elastic_search:
+            if self._use_cskg and self._use_elastic_search:
                 max_sents_per_source = int(self._max_tuples / 2)
             else:
                 max_sents_per_source = self._max_tuples
@@ -296,10 +299,10 @@ class ArcKnowledgeSentencesJsonReader(DatasetReader):
                                                                        max_sents_per_source)
                 selected_hits.extend(elastic_search_hits)
 
-            if self._use_conceptnet:
-                conceptnet_sentences = self.get_conceptnet_sentences(fact_text, answer_span, choice,
+            if self._use_cskg:
+                cskg_sentences = self.get_cskg_sentences(fact_text, answer_span, choice,
                                                                      max_sents_per_source)
-                selected_hits.extend(conceptnet_sentences)
+                selected_hits.extend(cskg_sentences)
             # add a dummy entry to capture the embedding link
             if self._ignore_spans:
                 fact_choice_sentence = fact_text + " || " + choice
