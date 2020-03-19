@@ -15,4 +15,4 @@
 #Repo
 /data
 /trained_models
-
+*.gz
