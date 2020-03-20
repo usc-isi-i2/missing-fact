@@ -13,11 +13,11 @@
         "type": "single_id"
       }
     },
-    "conceptnet_kb_path": "data/conceptnet/cached_conceptnet.tsv",
+    "kg_path": "data/cskg/edges_v003.csv", 
     "use_top_relation": "false",
     "indices": "busc_plusplus",
     "use_elastic_search": "true",
-    "use_conceptnet": "true",
+    "use_cskg": "true",
     "max_tuples": 10
   },
   "train_data_path": "data/input/missing_shortans/train_prefetched_SPAN_PRED.jsonl",

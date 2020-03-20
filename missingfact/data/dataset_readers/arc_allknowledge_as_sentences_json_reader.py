@@ -100,8 +100,8 @@ class ArcKnowledgeSentencesJsonReader(DatasetReader):
                                        max_hit_length, max_hits_per_choice)
             self._indices = indices
         if self._use_cskg:
-			nodes_path=kg_path.replace('edges', 'nodes')
-			self._node2label=load_node_labels(nodes_path)
+            nodes_path=kg_path.replace('edges', 'nodes')
+            self._node2label=load_node_labels(nodes_path)
             self._kb_tuples, self._tok_idx_map = load_kbtuples_map(kg_path, self._node2label,
                                                                    ignore_related)
         self._max_hit_length = max_hit_length
